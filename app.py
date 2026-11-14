@@ -16,6 +16,9 @@ HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/UsersData/resolve/main/u
 # 🔑 Hugging Face Token from Environment Variables
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
+# Debug print to check if Render successfully loaded your token
+print(f"🔑 HF_TOKEN loaded: {bool(HF_TOKEN)} (Length: {len(HF_TOKEN)})", flush=True)
+
 # 🔑 Hardcoded API Key
 API_KEY = "dhakkan"
 VALID_KEYS = {API_KEY: {}}
@@ -39,6 +42,8 @@ def _get_conn() -> duckdb.DuckDBPyConnection:
         # 🔑 Use DuckDB's native Hugging Face secret authentication
         if HF_TOKEN:
             con.execute(f"CREATE SECRET hf_token (TYPE HUGGINGFACE, TOKEN '{HF_TOKEN}');")
+        else:
+            print("⚠️ WARNING: HF_TOKEN is empty! Remote Parquet fetch will likely fail with 401.", flush=True)
         
         # 🚀 Speed & HTTP Range Request Optimizations
         con.execute("SET enable_http_metadata_cache = true;")
@@ -94,7 +99,7 @@ async def search(
     try:
         con = _get_conn()
         
-        # 🚀 Optimized direct column comparison query (uses HTTP range requests, zero full download)
+        # 🚀 Optimized direct column comparison query
         query = f"""
         SELECT * 
         FROM read_parquet('{HF_FILE}') 
