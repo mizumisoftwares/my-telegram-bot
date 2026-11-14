@@ -1,121 +1,107 @@
-import os
+"""FastAPI backend over DuckDB - HiTeckNuMinfo Email Search."""
 import json
-import requests
-from fastapi import FastAPI, Request, Response
-import uvicorn
+import os
+import threading
+import traceback
+from typing import Any
 
-# ---------- CONFIGURATION ----------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-user_states = {}
+import duckdb
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, Query, Response
 
-# ---------- LIVE DATA FETCH FUNCTION ----------
-def fetch_api_data(chat_id, text):
-    """Bina kisi background task ke, live data fetch karne ka function"""
-    cleaned = "".join([c for c in text if c.isdigit()])
-    if len(cleaned) < 10:
-        return "⚠️ Kam se kam 10-digit ka number bhejo bhai!"
+# 🔥 Public Dataset Path (No token required)
+HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/HiTeckNuMinfo-bucket/resolve/main/users_data.parquet"
 
-    final_number = cleaned[-10:]
-    selected_api = user_states.get(chat_id, "api1")
+# 🔑 Hardcoded API Key
+API_KEY = "dhakkan"
+VALID_KEYS = {API_KEY: {}}
 
-    # URL Selection
-    if selected_api == "api1":
-        url = f"https://tfqdeadlo-inddataapi.hf.space/search?mobile={final_number}"
-    elif selected_api == "api2":
-        url = f"https://tfqdeadlo-850crfastsearch.hf.space/search/{final_number}"
-    else:
-        url = f"https://tfqdeadlo-1-78bapi.hf.space/search?mobile={final_number}"
+app = FastAPI(title="NuMinfo Email Search API")
 
-    bt = "```"
+_conn = None
+_conn_lock = threading.Lock()
+
+def _get_conn() -> duckdb.DuckDBPyConnection:
+    global _conn
+    if _conn is not None:
+        return _conn
+    with _conn_lock:
+        if _conn is not None:
+            return _conn
+        con = duckdb.connect()
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+        con.execute("INSTALL parquet; LOAD parquet;")
+        
+        # 🚀 Speed settings (Metadata Cache)
+        con.execute("SET enable_http_metadata_cache = true;")
+        con.execute("SET http_keep_alive = true;")
+        con.execute("SET http_timeout = 600000;")
+        con.execute("SET threads = 4;")
+        
+        _conn = con
+        print("🌐 DuckDB ready (NuMinfo API)", flush=True)
+        return con
+
+def _check_key(key: str | None) -> tuple[bool, dict | None]:
+    if not key or key not in VALID_KEYS:
+        return False, {"message": "Provide correct key", "contact": "@Endexed"}
+    return True, VALID_KEYS[key]
+
+def _pretty(data: dict[str, Any], pretty: bool = True) -> Response:
+    if pretty:
+        return Response(content=json.dumps(data, indent=2, ensure_ascii=False), media_type="application/json")
+    return Response(content=json.dumps(data, ensure_ascii=False), media_type="application/json")
+
+@app.on_event("startup")
+async def startup_event():
     try:
-        # Live hit to your API (Hugging Face to Hugging Face is very fast)
-        response = requests.get(url, timeout=12)
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
-                return f"✅ **Data Found!**\n\n{bt}json\n{formatted_json}\n{bt}"
-            except:
-                return f"✅ **Data Found!**\n\n{bt}\n{response.text}\n{bt}"
-        else:
-            return f"❌ API Error Code: {response.status_code}"
+        _get_conn()
     except Exception as e:
-        return f"💥 API Fetch Error: {str(e)}"
-
-# ---------- FASTAPI ENGINE ----------
-app = FastAPI()
+        print(f"Startup failed: {e}", flush=True)
 
 @app.get("/")
-async def root():
-    return {"status": "Super Synchronous Bot Engine is Running", "secured": bool(BOT_TOKEN)}
+def home():
+    return {"app": "NuMinfo Email Search API", "status": "active", "contact": "@Endexed"}
 
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
+@app.get("/search")
+async def search(
+    key: str = Query(..., description="API Key"),
+    email: str = Query(..., description="Search by Email (exact match)"),
+    pretty: bool = Query(True)
+):
+    # 🔑 Key Check
+    valid, err = _check_key(key)
+    if not valid:
+        return Response(content=json.dumps(err, ensure_ascii=False), status_code=403, media_type="application/json")
+
+    # 🔍 Email Check
+    if not email or "@" not in email:
+        return Response(content=json.dumps({"message": "Provide valid email address", "contact": "@Endexed"}, ensure_ascii=False), status_code=400, media_type="application/json")
+
     try:
-        payload = await request.json()
+        con = _get_conn()
         
-        if "message" not in payload or "text" not in payload["message"]:
-            return Response(content=json.dumps({"status": "ignored"}), status_code=200)
-
-        message = payload["message"]
-        chat_id = message["chat"]["id"]
-        text = message["text"].strip()
+        query = f"SELECT * FROM read_parquet('{HF_FILE}') WHERE email = ? LIMIT 50"
         
-        reply_payload = {"method": "sendMessage", "chat_id": chat_id}
+        df = con.execute(query, [email.lower().strip()]).fetchdf()
 
-        # 1. Handle /start Command
-        if text == "/start":
-            reply_payload.update({
-                "text": "👋 Welcome Bhai! Niche keyboard me se koi ek API select karo:",
-                "reply_markup": {
-                    "keyboard": [[{"text": "1st API"}, {"text": "2nd API"}, {"text": "3rd API"}]],
-                    "one_time_keyboard": True,
-                    "resize_keyboard": True
-                }
-            })
-            return Response(content=json.dumps(reply_payload), media_type="application/json", status_code=200)
+        if df is None or df.empty:
+            return _pretty({"found": 0, "data": [], "developer": "@Endexed"}, pretty)
 
-        # 2. Handle API Selection
-        elif text in ["1st API", "2nd API", "3rd API"]:
-            if text == "1st API":
-                user_states[chat_id] = "api1"
-            elif text == "2nd API":
-                user_states[chat_id] = "api2"
-            else:
-                user_states[chat_id] = "api3"
-                
-            reply_payload.update({
-                "text": f"Selected: *{text}*\n\n📝 Ab mujhe mobile number bhejo.",
-                "parse_mode": "Markdown",
-                "reply_markup": {"remove_keyboard": True}
-            })
-            return Response(content=json.dumps(reply_payload), media_type="application/json", status_code=200)
+        # NaN values ko null kar do
+        df = df.replace([np.inf, -np.inf], np.nan)
+        df = df.where(pd.notnull(df), None)
+        records = df.to_dict(orient="records")
 
-        # 3. Handle Number Search (Live Synchronous Reply)
-        else:
-            # Turant live data nikalenge bina kisi external Telegram network call ke
-            result_message = fetch_api_data(chat_id, text)
-            
-            # State clear karenge taaki next time firse selection ho sake
-            if chat_id in user_states:
-                del user_states[chat_id]
-                
-            # Direct data response me wrap karke bhej rahe hain
-            reply_payload.update({
-                "text": result_message,
-                "parse_mode": "Markdown",
-                "reply_markup": {
-                    "keyboard": [[{"text": "1st API"}, {"text": "2nd API"}, {"text": "3rd API"}]],
-                    "one_time_keyboard": True,
-                    "resize_keyboard": True
-                }
-            })
-            return Response(content=json.dumps(reply_payload), media_type="application/json", status_code=200)
+        return _pretty({
+            "status": "success",
+            "developer": "@Endexed",
+            "found": len(records), 
+            "data": records, 
+            "contact": "@Endexed"
+        }, pretty)
 
-    except Exception as e:
-        print(f"🔴 Webhook Fatal Error: {e}")
-        return Response(content=json.dumps({"status": "error"}), status_code=200)
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
-    
+    except Exception:
+        traceback.print_exc()
+        return Response(content=json.dumps({"status": "error", "message": "Data not found", "contact": "@Endexed"}, ensure_ascii=False), status_code=500, media_type="application/json")
