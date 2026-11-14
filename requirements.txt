@@ -1,7 +1,6 @@
 fastapi
-uvicorn[standard]
-duckdb
+uvicorn
+duckdb>=1.1.0
 pandas
 numpy
-python-multipart
-requests
+pyarrow
