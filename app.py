@@ -1,6 +1,5 @@
-"""FastAPI backend over DuckDB - HiTeckNuMinfo Email Search."""
+"""FastAPI backend over DuckDB - HiTeckNuMinfo Search (Email & Mobile)."""
 import json
-import os
 import threading
 import traceback
 from typing import Any
@@ -17,7 +16,7 @@ HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/HiTeckNuMinfo-bucket/res
 API_KEY = "dhakkan"
 VALID_KEYS = {API_KEY: {}}
 
-app = FastAPI(title="NuMinfo Email Search API")
+app = FastAPI(title="NuMinfo Search API")
 
 _conn = None
 _conn_lock = threading.Lock()
@@ -62,12 +61,12 @@ async def startup_event():
 
 @app.get("/")
 def home():
-    return {"app": "NuMinfo Email Search API", "status": "active", "contact": "@Endexed"}
+    return {"app": "NuMinfo Search API", "status": "active", "contact": "@Endexed"}
 
 @app.get("/search")
 async def search(
     key: str = Query(..., description="API Key"),
-    email: str = Query(..., description="Search by Email (exact match)"),
+    search: str = Query(..., description="Search by Email or Mobile Number (exact match)"),
     pretty: bool = Query(True)
 ):
     # 🔑 Key Check
@@ -75,21 +74,33 @@ async def search(
     if not valid:
         return Response(content=json.dumps(err, ensure_ascii=False), status_code=403, media_type="application/json")
 
-    # 🔍 Email Check
-    if not email or "@" not in email:
-        return Response(content=json.dumps({"message": "Provide valid email address", "contact": "@Endexed"}, ensure_ascii=False), status_code=400, media_type="application/json")
+    # 🔍 Input Validation
+    clean_query = search.strip()
+    if not clean_query:
+        return Response(
+            content=json.dumps({"message": "Provide valid email or mobile number", "contact": "@Endexed"}, ensure_ascii=False),
+            status_code=400,
+            media_type="application/json"
+        )
 
     try:
         con = _get_conn()
         
-        query = f"SELECT * FROM read_parquet('{HF_FILE}') WHERE email = ? LIMIT 50"
+        # Returns all matching rows including duplicates (no DISTINCT or LIMIT)
+        # Note: Ensure 'phoneNumber' matches your Parquet column name (e.g., phone, mobile, phoneNumber)
+        query = f"""
+        SELECT * 
+        FROM read_parquet('{HF_FILE}') 
+        WHERE LOWER(email) = ? 
+           OR CAST(mobile AS VARCHAR) = ?
+        """
         
-        df = con.execute(query, [email.lower().strip()]).fetchdf()
+        df = con.execute(query, [clean_query.lower(), clean_query]).fetchdf()
 
         if df is None or df.empty:
             return _pretty({"found": 0, "data": [], "developer": "@Endexed"}, pretty)
 
-        # NaN values ko null kar do
+        # NaN values ko null kar do (keeping all duplicate rows intact)
         df = df.replace([np.inf, -np.inf], np.nan)
         df = df.where(pd.notnull(df), None)
         records = df.to_dict(orient="records")
@@ -104,4 +115,8 @@ async def search(
 
     except Exception:
         traceback.print_exc()
-        return Response(content=json.dumps({"status": "error", "message": "Data not found", "contact": "@Endexed"}, ensure_ascii=False), status_code=500, media_type="application/json")
+        return Response(
+            content=json.dumps({"status": "error", "message": "Data not found", "contact": "@Endexed"}, ensure_ascii=False),
+            status_code=500,
+            media_type="application/json"
+        )
