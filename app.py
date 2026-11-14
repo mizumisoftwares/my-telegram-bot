@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query, Response
 
-# 🔥 Public Dataset Path (No token required)
-HF_FILE = "https://huggingface.co/buckets/sarveshmgkvp/UsersData/resolve/users_data.parquet"
+# 🔥 Public Dataset Path (Ensure it uses /resolve/ and includes branch like /main/ if required)
+HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/UsersData/resolve/main/users_data.parquet"
 
 # 🔑 Hardcoded API Key
 API_KEY = "dhakkan"
@@ -32,7 +32,7 @@ def _get_conn() -> duckdb.DuckDBPyConnection:
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute("INSTALL parquet; LOAD parquet;")
         
-        # 🚀 Speed settings (Metadata Cache)
+        # 🚀 Speed & HTTP Range Request Optimizations
         con.execute("SET enable_http_metadata_cache = true;")
         con.execute("SET http_keep_alive = true;")
         con.execute("SET http_timeout = 600000;")
@@ -66,7 +66,7 @@ def home():
 @app.get("/search")
 async def search(
     key: str = Query(..., description="API Key"),
-    search: str = Query(..., description="Search by Email or Mobile Number (exact match)"),
+    search: str = Query(..., description="Search by Email or Mobile Number"),
     pretty: bool = Query(True)
 ):
     # 🔑 Key Check
@@ -86,21 +86,21 @@ async def search(
     try:
         con = _get_conn()
         
-        # Returns all matching rows including duplicates (no DISTINCT or LIMIT)
-        # Note: Ensure 'phoneNumber' matches your Parquet column name (e.g., phone, mobile, phoneNumber)
+        # 🚀 OPTIMIZED QUERY: Direct column comparison enables Parquet statistics pushdown.
+        # DuckDB will fetch only the specific byte ranges needed via HTTP range requests.
         query = f"""
         SELECT * 
         FROM read_parquet('{HF_FILE}') 
-        WHERE LOWER(email) = ? 
-           OR CAST(mobile AS VARCHAR) = ?
+        WHERE email = ? 
+           OR mobile = ?
         """
         
-        df = con.execute(query, [clean_query.lower(), clean_query]).fetchdf()
+        df = con.execute(query, [clean_query, clean_query]).fetchdf()
 
         if df is None or df.empty:
             return _pretty({"found": 0, "data": [], "developer": "@Endexed"}, pretty)
 
-        # NaN values ko null kar do (keeping all duplicate rows intact)
+        # NaN values to null (keeping all duplicate rows intact)
         df = df.replace([np.inf, -np.inf], np.nan)
         df = df.where(pd.notnull(df), None)
         records = df.to_dict(orient="records")
