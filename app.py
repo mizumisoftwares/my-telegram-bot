@@ -1,5 +1,6 @@
 """FastAPI backend over DuckDB - HiTeckNuMinfo Search (Email & Mobile)."""
 import json
+import os
 import threading
 import traceback
 from typing import Any
@@ -9,10 +10,13 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query, Response
 
-# 🔥 Public Dataset Path (Ensure it uses /resolve/ and includes branch like /main/ if required)
+# 🔥 Dataset Path
 HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/UsersData/resolve/main/users_data.parquet"
 
-# 🔑 Hardcoded API Key
+# 🔑 Hugging Face Token (Read from environment variables)
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+
+# 🔑 Hardcoded API Key for your API
 API_KEY = "dhakkan"
 VALID_KEYS = {API_KEY: {}}
 
@@ -31,6 +35,10 @@ def _get_conn() -> duckdb.DuckDBPyConnection:
         con = duckdb.connect()
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute("INSTALL parquet; LOAD parquet;")
+        
+        # 🔑 Authenticate with Hugging Face if token is provided
+        if HF_TOKEN:
+            con.execute(f"SET http_headers = {{'Authorization': 'Bearer {HF_TOKEN}'}};")
         
         # 🚀 Speed & HTTP Range Request Optimizations
         con.execute("SET enable_http_metadata_cache = true;")
@@ -86,8 +94,7 @@ async def search(
     try:
         con = _get_conn()
         
-        # 🚀 OPTIMIZED QUERY: Direct column comparison enables Parquet statistics pushdown.
-        # DuckDB will fetch only the specific byte ranges needed via HTTP range requests.
+        # 🚀 Optimized query using direct column comparisons for HTTP range requests (zero full-file download)
         query = f"""
         SELECT * 
         FROM read_parquet('{HF_FILE}') 
