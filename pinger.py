@@ -1,14 +1,13 @@
 import time
 import requests
 
-# Yeh link wahi hai jise aap active rakhna chahte hain
-URL = "https://tfqdeadlox636-my-telegram-bot.hf.space"
+URL = "https://hiteckgrouppp-hi-tecknuminfo.hf.space"
 
 while True:
     try:
-        requests.get(URL)
-        print(f"Pinged {URL} successfully!")
+        response = requests.get(URL, timeout=10)
+        print(f"Status: {response.status_code}")
     except Exception as e:
-        print(f"Error pinging: {e}")
-    time.sleep(300) # 5 minute
-    
+        print(f"Ping failed: {e}")
+
+    time.sleep(300)  # 5 minutes
