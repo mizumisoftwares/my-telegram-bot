@@ -1,5 +1,7 @@
-pyTelegramBotAPI
-requests
-gradio
 fastapi
-uvicorn
+uvicorn[standard]
+duckdb
+pandas
+numpy
+python-multipart
+requests
