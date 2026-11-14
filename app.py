@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import FastAPI, Query, Response
 
 # 🔥 Public Dataset Path (No token required)
-HF_FILE = "https://huggingface.co/buckets/sarveshmgkvp/UsersData/resolve/main/users_data.parquet"
+HF_FILE = "https://huggingface.co/buckets/sarveshmgkvp/UsersData/resolve/users_data.parquet"
 
 # 🔑 Hardcoded API Key
 API_KEY = "dhakkan"
