@@ -11,7 +11,7 @@ import pandas as pd
 from fastapi import FastAPI, Query, Response
 
 # 🔥 Dataset Path
-HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/UsersData/resolve/main/users_data.parquet"
+HF_FILE = "https://huggingface.co/datasets/sarveshmgkvp/UsersData/resolve/users_data.parquet"
 
 # 🔑 Hugging Face Token from Environment Variables
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
